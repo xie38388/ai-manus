@@ -42,11 +42,15 @@ class PlannerAgent(BaseAgent):
         agent_id: str,
         agent_repository: AgentRepository,
         tools: List[BaseToolkit],
+        session_id: str = "",
+        user_id: str = "",
     ):
         super().__init__(
             agent_id=agent_id,
             agent_repository=agent_repository,
             tools=tools,
+            session_id=session_id,
+            user_id=user_id,
         )
 
 

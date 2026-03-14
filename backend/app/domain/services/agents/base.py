@@ -1,6 +1,7 @@
 import logging
 import asyncio
 import uuid
+import time
 from abc import ABC
 from typing import List, Dict, Any, Optional, AsyncGenerator
 from app.domain.models.message import Message
@@ -21,6 +22,8 @@ from app.core.config import get_settings
 from langchain.messages import AIMessage, HumanMessage, ToolCall, ToolMessage, SystemMessage
 from app.domain.services.tools.base import Tool
 from app.domain.utils.robust_json_parser import RobustJsonParser, ToolCallParseError
+from app.domain.services.sovr.gate import SovrGate
+from app.domain.services.sovr.policy import PolicyAction
 
 
 logger = logging.getLogger(__name__)
@@ -45,7 +48,9 @@ class BaseAgent(ABC):
         self,
         agent_id: str,
         agent_repository: AgentRepository,
-        tools: List[BaseToolkit] = []
+        tools: List[BaseToolkit] = [],
+        session_id: str = "",
+        user_id: str = "",
     ):
         settings = get_settings()
         self._agent_id = agent_id
@@ -67,6 +72,11 @@ class BaseAgent(ABC):
         )
         self.toolkits = tools
         self.memory = None
+        # SOVR Gate: trust layer for tool call oversight
+        self._sovr_gate = SovrGate(
+            session_id=session_id or agent_id,
+            user_id=user_id or "system",
+        ) if session_id else None
 
     async def _parse_json(self, text: str) -> dict:
         """Parse JSON from LLM output using RetryWithErrorOutputParser."""
@@ -119,6 +129,47 @@ class BaseAgent(ABC):
                     yield ErrorEvent(error=f"Unknown tool: {function_name}")
                     continue
 
+                # ===== SOVR Gate Check =====
+                sovr_decision = None
+                if self._sovr_gate:
+                    sovr_decision = self._sovr_gate.check(
+                        tool_name=tool.toolkit.name,
+                        function_name=function_name,
+                        function_args=function_args,
+                    )
+                    if not sovr_decision.allowed:
+                        logger.warning(
+                            f"[SOVR] Blocked tool call: {function_name} - "
+                            f"{sovr_decision.reason}"
+                        )
+                        # Return block message as tool result so the LLM knows
+                        blocked_msg = ToolMessage(
+                            tool_call_id=tool_call_id,
+                            name=function_name,
+                            content=f"[SOVR BLOCKED] {sovr_decision.reason}. "
+                                    f"This operation was blocked by the security policy. "
+                                    f"Please use a safer alternative.",
+                        )
+                        tool_responses.append(blocked_msg)
+                        # Still emit events so frontend can show the block
+                        yield ToolEvent(
+                            status=ToolStatus.CALLING,
+                            tool_call_id=tool_call_id,
+                            tool_name=tool.toolkit.name,
+                            function_name=function_name,
+                            function_args=function_args,
+                        )
+                        yield ToolEvent(
+                            status=ToolStatus.CALLED,
+                            tool_call_id=tool_call_id,
+                            tool_name=tool.toolkit.name,
+                            function_name=function_name,
+                            function_args=function_args,
+                            function_result={"sovr_blocked": True, "reason": sovr_decision.reason},
+                        )
+                        continue
+                # ===== End SOVR Gate Check =====
+
                 # Generate event before tool call
                 yield ToolEvent(
                     status=ToolStatus.CALLING,
@@ -128,7 +179,18 @@ class BaseAgent(ABC):
                     function_args=function_args
                 )
 
+                # Execute the tool with timing for audit
+                _start_ms = int(time.time() * 1000)
                 tool_result = await self.invoke_tool(tool, tool_call)
+                _duration_ms = int(time.time() * 1000) - _start_ms
+
+                # Record execution result in SOVR audit
+                if self._sovr_gate and sovr_decision:
+                    self._sovr_gate.record_result(
+                        audit_entry_id=sovr_decision.audit_entry_id,
+                        success=True,
+                        duration_ms=_duration_ms,
+                    )
 
                 # Generate event after tool call
                 yield ToolEvent(

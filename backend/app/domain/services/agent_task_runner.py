@@ -73,6 +73,7 @@ class AgentTaskRunner(TaskRunner):
             self._browser,
             self._mcp_tool,
             self._search_engine,
+            user_id=self._user_id,
         )
 
     async def _put_and_add_event(self, task: Task, event: AgentEvent) -> None:
@@ -208,6 +209,22 @@ class AgentTaskRunner(TaskRunner):
             await self._sandbox.ensure_sandbox()
             await self._mcp_tool.initialized(await self._mcp_repository.get_mcp_config())
             while not await task.input_stream.is_empty():
+                # ── SOVR Billing: Credit check before processing ──
+                try:
+                    from app.domain.services.billing.credit_service import get_credit_service
+                    credit_service = get_credit_service()
+                    credit_check = await credit_service.check_credits(self._user_id, "agent_task")
+                    if not credit_check.allowed:
+                        logger.warning(f"[Billing] User {self._user_id} blocked: {credit_check.reason}")
+                        await self._put_and_add_event(task, ErrorEvent(error=f"Credit limit: {credit_check.reason}"))
+                        await self._session_repository.update_status(self._session_id, SessionStatus.COMPLETED)
+                        return
+                    # Deduct credits
+                    await credit_service.consume_credits(self._user_id, "agent_task")
+                except Exception as billing_err:
+                    logger.warning(f"[Billing] Credit check failed (allowing): {billing_err}")
+                # ── End billing check ──
+
                 event = await self._pop_event(task)
                 message = ""
                 if isinstance(event, MessageEvent):

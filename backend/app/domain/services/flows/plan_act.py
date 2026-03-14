@@ -48,6 +48,7 @@ class PlanActFlow(BaseFlow):
         browser: Browser,
         mcp_tool: MCPToolkit,
         search_engine: Optional[SearchEngine] = None,
+        user_id: str = "",
     ):
         self._agent_id = agent_id
         self._repository = agent_repository
@@ -68,11 +69,13 @@ class PlanActFlow(BaseFlow):
         if search_engine:
             tools.append(SearchToolkit(search_engine))
 
-        # Create planner and execution agents
+        # Create planner and execution agents with SOVR gate
         self.planner = PlannerAgent(
             agent_id=self._agent_id,
             agent_repository=self._repository,
             tools=tools,
+            session_id=session_id,
+            user_id=user_id,
         )
         logger.debug(f"Created planner agent for Agent {self._agent_id}")
             
@@ -80,6 +83,8 @@ class PlanActFlow(BaseFlow):
             agent_id=self._agent_id,
             agent_repository=self._repository,
             tools=tools,
+            session_id=session_id,
+            user_id=user_id,
         )
         logger.debug(f"Created execution agent for Agent {self._agent_id}")
 

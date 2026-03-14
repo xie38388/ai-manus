@@ -50,6 +50,8 @@
           <MessageSquareDashed :size="38" />
           <span class="text-sm font-medium">{{ t('Create a task to get started') }}</span></div>
       </div>
+      <!-- Credit Balance Badge -->
+      <CreditBadge />
     </div>
   </div>
 </template>
@@ -57,6 +59,7 @@
 <script setup lang="ts">
 import { PanelLeft, Plus, Command, MessageSquareDashed } from 'lucide-vue-next';
 import SessionItem from './SessionItem.vue';
+import CreditBadge from './CreditBadge.vue';
 import { useLeftPanel } from '../composables/useLeftPanel';
 import { ref, onMounted, watch, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';

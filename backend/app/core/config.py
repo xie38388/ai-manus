@@ -91,6 +91,11 @@ class Settings(BaseSettings):
     # Extra headers for LLM requests (parsed from EXTRA_HEADERS env var, JSON)
     extra_headers: dict | None = None
     
+    # Stripe configuration
+    stripe_secret_key: str | None = None
+    stripe_publishable_key: str | None = None
+    stripe_webhook_secret: str | None = None
+    
     # MCP configuration
     mcp_config_path: str = "/etc/mcp.json"
     
